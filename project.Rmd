@@ -1,0 +1,83 @@
+---
+title: "Practical Machine Learning"
+author: "Jaakko Moisio"
+date: "September 25, 2015"
+output: html_document
+---
+
+# Introduction
+
+This is the writeup part of the course project of Practical Machine Learning MOOC by John Hopkins University. In this report the Human Action Recognition dataset is studied. We want to know if we can predict whether or not a person performed weight lifting correctly based on activity information provided by several sensors attached to the participants of the experiment. Please see http://groupware.les.inf.puc-rio.br/har for more details on the dataset.
+
+`caret` package was used for developing the model.
+
+# Feature selection
+
+The training set consists of 19622 observations with 160 variables.
+
+```{r,message=FALSE}
+library(dplyr)
+library(caret)
+pml <- read.csv("pml-training.csv")
+dim(pml)
+```
+
+The data was divided into 80 % training set and 20 % tests set.
+
+```{r,message=FALSE}
+set.seed(123)
+trainIndex <- createDataPartition(pml$classe, p = 0.8, list = FALSE)
+training <- pml[trainIndex,]
+testing <- pml[-trainIndex,]
+```
+
+The first step to reduce the data was removing the first six columns that contained meta data such as case numbers, participant names and timestamps. Also columns containing mostly NAs and near zero values were removed. This brought number of variables down to 54.
+
+```{r,message=FALSE}
+training <- select(training, num_window:classe)
+na_columns <- apply(training, 2, function(x) mean(is.na(x)) < 0.5)
+training <- training[,na_columns]
+training <- training[,-nearZeroVar(training)]
+dim(training)
+```
+
+In section Training it is seen that training with this set was reasonably fast and accurate, so no further feature reduction was necessary.
+
+# Exploratory data analysis
+
+Doing exploratory data analysis and plotting distributions of the remaining variables revealed that there was much overlapping in the values. Also instead of the features being concentrated into one location per class, the feature vectors formed several “blobs” each containing representatives of multiple classes. This can be seen e.g. by plotting the first principal components.
+
+```{r,message=FALSE}
+features <- training[,names(training) != "classe"]
+pp <- preProcess(features, method = c("BoxCox", "center", "scale", "pca"),
+                 pcaComp = 2)
+features2 <- predict(pp, features)
+qplot(features2$PC1, features2$PC2, color = training$classe)
+```
+
+The exploratory data analysis ruled out any linear classifiers.
+
+**Note!** To keep the report readable, this is a simple demonstration only. Just plotting two principal components does not prove that the classes are not linearly separable. By studying distributions and scatterplots of multiple variables in each class one can become more confident of that.
+
+# Training
+
+By first experimenting with small training sets random forest was found to be very accurate and (reasonably) fast to train. The final model was trained using the whole training set and 4-fold cross-validation.
+
+```{r,message=FALSE}
+model <- train(classe ~ ., data = training, method = "rf",
+               trControl = trainControl(method = "cv", number = 4))
+model
+```
+
+The optimal accuracy (99.7 %) was achieved with `mtry` value 27. Thus **the in sample error is `1 - 0.997 = 0.003`, or 0.3 %**.
+
+# Testing the model
+
+The model trained in the previous section was very accurate with testing set.
+
+```{r,message=FALSE}
+predictions <- predict(model, newdata=testing)
+confusionMatrix(predictions, testing$classe)
+```
+
+The confusion matrix revealed amongst other things 99.9 % overall accuracy. Based on the number of incorrectly predicted samples in test set **the estimate for out of sample error is `1 - 0.999 = 0.001`, or 0.1 %**.
